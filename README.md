@@ -1,3 +1,5 @@
+# WIP: SquishFish - Making Pufferfish small.
+
 # Index
  * [What is pufferfish?](#whatis)
  * [Using pufferfish?](#using)
@@ -29,7 +31,7 @@ To build the pufferfish do the following,
 > mkdir build
 > cd build
 > cmake ../
-> make
+> make pufferfish
 ```
 
 # Using Pufferfish <a name="using"></a>
