@@ -18,7 +18,7 @@ jobs:
         - mkdir build
         - cd build
         - cmake ../
-        - make pufferfish
+        - make pufferfish -j 4
 
 branches:
   only:
