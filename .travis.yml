@@ -22,4 +22,5 @@ jobs:
 
 branches:
   only:
-    - ext_compress
+    - squishfish
+    - travis
