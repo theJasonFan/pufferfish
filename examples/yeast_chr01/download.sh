@@ -1,0 +1,1 @@
+wget -O yeastchr01.fasta https://downloads.yeastgenome.org/sequence/S288C_reference/chromosomes/fasta/chr01.fsa
