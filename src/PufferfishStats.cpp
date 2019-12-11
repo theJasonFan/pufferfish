@@ -1,13 +1,20 @@
 #include "ProgOpts.hpp"
 #include <iostream>
+#include "compact_vector/compact_vector.hpp"
 
 int pufferfishStats(pufferfish::StatsOptions& opts) {
 	auto index_dir = opts.index_dir;
-	auto stats_out = opts.stats_out;
+	bool out = !opts.stats_out.empty();
+	compact::vector<uint64_t> auxInfo_{16};
+	std::ostream* fp = out ? new std::ofstream(opts.stats_out) : &std::cout ;
 
-	std::cout << "index_dir: " << index_dir << '\n';
-	std::cout << "stats_out: " << stats_out << '\n';
-    std::cout << "I'm a smol fish\n";
+    auxInfo_.deserialize(index_dir + "/extension.bin", false);
+
+	*fp << "index_dir: " << index_dir << '\n';
+    *fp << "I'm a smol fish\n";
+    *fp << auxInfo_[10] << '\n';
+
+    if (out) delete fp;
 
     return 0;
 }
