@@ -70,6 +70,7 @@ set(pufferfish_lib_srcs
     PufferfishValidate.cpp
     PufferfishTestLookup.cpp 
     PufferfishExamine.cpp
+    PufferfishStats.cpp
     FastxParser.cpp 
 #    PufferfishGFAReader.cpp
 	PufferfishBinaryGFAReader.cpp

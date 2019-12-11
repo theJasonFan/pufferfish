@@ -36,19 +36,18 @@
 
 int pufferfishIndex(pufferfish::IndexOptions& indexOpts); // int argc, char* argv[]);
 int pufferfishTest(pufferfish::TestOptions& testOpts);    // int argc, char* argv[]);
-int pufferfishValidate(
-                       pufferfish::ValidateOptions& validateOpts); // int argc, char* argv[]);
-int pufferfishTestLookup(
-                         pufferfish::ValidateOptions& lookupOpts); // int argc, char* argv[]);
+int pufferfishValidate(pufferfish::ValidateOptions& validateOpts); // int argc, char* argv[]);
+int pufferfishTestLookup(pufferfish::ValidateOptions& lookupOpts); // int argc, char* argv[]);
 int pufferfishAligner(pufferfish::AlignmentOpts& alignmentOpts) ;
 int pufferfishExamine(pufferfish::ExamineOptions& examineOpts);
+int pufferfishStats(pufferfish::StatsOptions& statsOpts);
 
 int main(int argc, char* argv[]) {
   using namespace clipp;
   using std::cout;
   std::setlocale(LC_ALL, "en_US.UTF-8");
 
-  enum class mode {help, index, validate, lookup, align, examine};
+  enum class mode {help, index, validate, lookup, align, examine, stats};
   mode selected = mode::help;
   pufferfish::AlignmentOpts alignmentOpt ;
   pufferfish::IndexOptions indexOpt;
@@ -56,6 +55,7 @@ int main(int argc, char* argv[]) {
   pufferfish::ValidateOptions validateOpt;
   pufferfish::ValidateOptions lookupOpt;
   pufferfish::ExamineOptions examineOpt;
+  pufferfish::StatsOptions statsOpt;
 
   auto ensure_file_exists = [](const std::string& s) -> bool {
       bool exists = ghc::filesystem::exists(s);
@@ -214,9 +214,15 @@ int main(int argc, char* argv[]) {
                     "the maximum number of mems, that a reference must contain in order "
                     "to move forward with computing an optimal chain score (default=0.65)"
   );
+  
+  auto statsMode = (
+                    command("stats").set(selected, mode::stats),
+                    (required("-i", "--index") & value(ensure_index_exists, "index_dir", statsOpt.index_dir)) % "directory where the pufferfish index is stored", 
+                    (option("-o", "--output") & value("out_file", statsOpt.stats_out)) % "path where the stat results are written"
+                    );
 
   auto cli = (
-              (indexMode | validateMode | lookupMode | alignMode | examineMode | command("help").set(selected,mode::help) ),
+              (indexMode | validateMode | lookupMode | alignMode | examineMode | statsMode | command("help").set(selected,mode::help) ),
               option("-v", "--version").call([]{std::cout << "version " << pufferfish::version << "\n"; std::exit(0);}).doc("show version"));
 
   decltype(parse(argc, argv, cli)) res;
@@ -238,6 +244,7 @@ int main(int argc, char* argv[]) {
     case mode::align: pufferfishAligner(alignmentOpt); break;
     case mode::examine: pufferfishExamine(examineOpt); break;
     case mode::help: std::cout << make_man_page(cli, pufferfish::progname); break;
+    case mode::stats: pufferfishStats(statsOpt); break;
     }
   } else {
     auto b = res.begin();
@@ -251,6 +258,8 @@ int main(int argc, char* argv[]) {
         std::cout << make_man_page(lookupMode, pufferfish::progname);
       } else if (b->arg() == "align") {
         std::cout << make_man_page(alignMode, pufferfish::progname);
+      } else if (b->arg() == "stats") {
+        std::cout << make_man_page(statsMode, pufferfish::progname);
       } else {
         std::cout << "There is no command \"" << b->arg() << "\"\n";
         std::cout << usage_lines(cli, pufferfish::progname) << '\n';

@@ -100,6 +100,13 @@ public:
   bool mimicBt2Strict{false};
   bool allowOverhangSoftclip{false};
 };
+
+class StatsOptions {
+public:
+  std::string index_dir;
+  std::string stats_out;
+};
+
 }
 
 #endif
