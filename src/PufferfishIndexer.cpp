@@ -276,7 +276,7 @@ void dumpCompactToFile(VecT& v, std::string fname) {
 }
 
 int fixFastaMain(std::vector<std::string>& args,
-        std::vector<uint32_t>& refIdExtension,
+                 std::vector<uint32_t>& refIdExtension,
                  std::vector<std::pair<std::string, uint16_t>>& shortRefsNameLen,
                  std::shared_ptr<spdlog::logger> logger);
 int buildGraphMain(std::vector<std::string>& args);
@@ -432,7 +432,10 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
                             bool keepRef,
                             bool haveEdgeVec);
 
-
+/*****************************************************************************/
+/* Build a pufferfish index of a specific kind */
+/*****************************************************************************/
+// NB: One big long function!
 int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
   uint32_t k = indexOpts.k;
   std::vector<std::string> rfiles = indexOpts.rfile;
@@ -742,9 +745,6 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
 
     jointLog->info("writing index components");
     /** Write the index **/
-
-
-
     std::ofstream descStream(outdir + "/info.json");
     {
       cereal::JSONOutputArchive indexDesc(descStream);
@@ -947,18 +947,17 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
 /* Build sparse pufferfish index */
 /*****************************************************************************/
 
-void pufferfishSparseIndex(
-  pufferfish::IndexOptions& indexOpts,
-  size_t w,
-  size_t nkeys,
-  size_t numKmers,
-  pufferfish::BinaryGFAReader& pf, 
-  std::shared_ptr<spdlog::logger>& jointLog, 
-  boophf_t *bphf, //typedef this?
-  size_t numContigs,
-  size_t tlen,
-  bool keepRef,
-  bool haveEdgeVec) 
+void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
+                            size_t w,
+                            size_t nkeys,
+                            size_t numKmers,
+                            pufferfish::BinaryGFAReader& pf, 
+                            std::shared_ptr<spdlog::logger>& jointLog, 
+                            boophf_t *bphf, //typedef this?
+                            size_t numContigs,
+                            size_t tlen,
+                            bool keepRef,
+                            bool haveEdgeVec) 
 {
   std::string outdir = indexOpts.outdir;
 
@@ -1180,8 +1179,6 @@ void pufferfishSparseIndex(
 
 
   }
-
-  // TODO: Possible soln: I could compress AuxInfo, and fill in Extension endpoint
 
   /** Write the index **/
   std::ofstream descStream(outdir + "/info.json");
