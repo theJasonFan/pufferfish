@@ -313,58 +313,23 @@ bool copySigArchive(cereal::JSONInputArchive& sigArch, cereal::JSONOutputArchive
   return true;
 }
 
+/******************************************************************************/
+/* Preprocessing: fixFasta  -> TwoPaCo */
+/******************************************************************************/
 
-int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
-  uint32_t k = indexOpts.k;
-  std::vector<std::string> rfiles = indexOpts.rfile;
-  std::string rfile;
-  std::string outdir = indexOpts.outdir;
-  std::string gfa_file = indexOpts.outdir;
-  bool buildEdgeVec = indexOpts.buildEdgeVec;
+std::string fixFasta(pufferfish::IndexOptions& indexOpts,
+                    std::shared_ptr<spdlog::logger>& jointLog,
+                    std::vector<uint32_t>& refIdExtensions,
+                    std::vector<std::pair<std::string, uint16_t>> shortRefsNameLen
+)
+{
+    std::vector<std::string> rfiles = indexOpts.rfile;
+    std::string outdir = indexOpts.outdir;
+    uint32_t k = indexOpts.k;
 
-  std::vector<uint32_t> refIdExtensions;
-  std::vector<std::pair<std::string, uint16_t>> shortRefsNameLen;
-
-  // If the user included the '/' in the output directory path, remove
-  // it here
-  if (outdir.back() == '/') {
-    outdir.pop_back();
-  }
-
-  size_t tlen{0};
-  size_t numKmers{0};
-  size_t nread{0};
-  CanonicalKmer::k(k);
-
-  if (ghc::filesystem::exists(outdir.c_str())) {
-      if (!ghc::filesystem::is_directory(outdir.c_str())) {
-          auto console = spdlog::stderr_color_mt("console");
-          console->error("{} exists as a file. Cannot create a directory of the same name.", outdir.c_str());
-          std::exit(1);
-      }
-  } else {
-      ghc::filesystem::create_directories(outdir.c_str());
-  }
-
-  std::string logPath = outdir + "/ref_indexing.log";
-  auto fileSink = std::make_shared<spdlog::sinks::simple_file_sink_st>(logPath);
-  auto consoleSink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_mt>();
-  auto consoleLog = spdlog::create("puff::index::stderrLog", {consoleSink});
-  auto fileLog = spdlog::create("puff::index::fileLog", {fileSink});
-  std::vector<spdlog::sink_ptr> sinks{consoleSink, fileSink};
-  auto jointLog = spdlog::create("puff::index::jointLog", std::begin(sinks), std::end(sinks));
-
-  /*if (puffer::fs::MakePath(outdir.c_str()) != 0) {
-      std::cerr << "\nyup that's it\n";
-    jointLog->error(std::strerror(errno));
-    std::exit(1);
-  }*/
-
-  // running fixFasta
-  {
     jointLog->info("Running fixFasta");
     std::vector<std::string> args;
-//    args.push_back("fixFasta");
+
     if (!indexOpts.decoy_file.empty()) {
       args.push_back("--decoys");
       args.push_back(indexOpts.decoy_file);
@@ -388,28 +353,17 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
         jointLog->error("The fixFasta phase failed with exit code {}", ffres);
         std::exit(ffres);
     }
-    // replacing rfile with the new fixed fasta file
-    rfile = outdir+"/ref_k"+std::to_string(k)+"_fixed.fa";
-  }
+    // Return path rfile with the new fixed fasta file
+    return outdir+"/ref_k"+std::to_string(k)+"_fixed.fa";
+}
 
-  // If the filter size isn't set by the user, estimate it with ntCard
-  if (indexOpts.filt_size == -1){
-    jointLog->info("Filter size not provided; estimating from number of distinct k-mers");
-    auto nk = getNumDistinctKmers(k, rfile);
-    double p = 0.001;
-    double k = 5.0;
-    double logp_k = std::log(p) / k;
-    double r = (-k) / std::log(1.0 - std::exp(logp_k));
-    indexOpts.filt_size = static_cast<int32_t>(std::ceil(std::log2(std::ceil(nk * r))));
-    jointLog->info("ntHll estimated {} distinct k-mers, setting filter size to 2^{}", nk, indexOpts.filt_size);
-    /*
-    lgp_k = l($p) / $k
-    r = (-$k) / l(1 - e(lgp_k))
-    ceil(l(ceil($n * r))/l(2))
-    */
-  }
+void twopaco(pufferfish::IndexOptions& indexOpts,
+             std::shared_ptr<spdlog::logger>& jointLog,
+             std::string rfile)
+{
+    std::string outdir = indexOpts.outdir;
+    uint32_t k = indexOpts.k;
 
-  {
     std::vector<std::string> args;
     args.push_back("twopaco");
     args.push_back("-k");
@@ -448,6 +402,99 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
     // cleanup tmp
     ghc::filesystem::remove_all(twopaco_tmp_path);
   }
+
+typedef boomphf::SingleHashFunctor<uint64_t> hasher_t;
+typedef boomphf::mphf<uint64_t, hasher_t> boophf_t;
+
+void safe_create_directories(std::string path)
+{
+  auto p = path.c_str();
+  if (ghc::filesystem::exists(p)) {
+    if (!ghc::filesystem::is_directory(p)) {
+        auto console = spdlog::stderr_color_mt("console");
+        console->error("{} exists as a file. Cannot create a directory of the same name.", p);
+        std::exit(1);
+    }
+  } else {
+      ghc::filesystem::create_directories(p);
+  }
+}
+/* Build and store pufferfish sparse index to disk */
+void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
+                            size_t w,
+                            size_t nkeys,
+                            size_t numKmers,
+                            pufferfish::BinaryGFAReader& pf, //reference?
+                            std::shared_ptr<spdlog::logger>& jointLog,
+                            boophf_t *bphf,
+                            size_t numContigs,
+                            size_t tlen,
+                            bool keepRef,
+                            bool haveEdgeVec);
+
+
+int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
+  uint32_t k = indexOpts.k;
+  std::vector<std::string> rfiles = indexOpts.rfile;
+  std::string rfile;
+  std::string outdir = indexOpts.outdir;
+  std::string gfa_file = indexOpts.outdir;
+  bool buildEdgeVec = indexOpts.buildEdgeVec;
+
+  std::vector<uint32_t> refIdExtensions;
+  std::vector<std::pair<std::string, uint16_t>> shortRefsNameLen;
+
+  // If the user included the '/' in the output directory path, remove
+  // it here
+  if (outdir.back() == '/') {
+    outdir.pop_back();
+  }
+
+  size_t tlen{0};
+  size_t numKmers{0};
+  size_t nread{0};
+  CanonicalKmer::k(k);
+
+  // Create requisite directories for outputs
+  safe_create_directories(outdir);
+
+  std::string logPath = outdir + "/ref_indexing.log";
+  auto fileSink = std::make_shared<spdlog::sinks::simple_file_sink_st>(logPath);
+  auto consoleSink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_mt>();
+  auto consoleLog = spdlog::create("puff::index::stderrLog", {consoleSink});
+  auto fileLog = spdlog::create("puff::index::fileLog", {fileSink});
+  std::vector<spdlog::sink_ptr> sinks{consoleSink, fileSink};
+  auto jointLog = spdlog::create("puff::index::jointLog", std::begin(sinks), std::end(sinks));
+
+  /*if (puffer::fs::MakePath(outdir.c_str()) != 0) {
+      std::cerr << "\nyup that's it\n";
+    jointLog->error(std::strerror(errno));
+    std::exit(1);
+  }*/
+
+  // running fixFasta
+  // Return path rfile with the new fixed fasta file
+  rfile = fixFasta(indexOpts, jointLog, refIdExtensions, shortRefsNameLen);
+
+  // If the filter size isn't set by the user, estimate it with ntCard
+  if (indexOpts.filt_size == -1){
+    jointLog->info("Filter size not provided; estimating from number of distinct k-mers");
+    auto nk = getNumDistinctKmers(k, rfile);
+    double p = 0.001;
+    double k = 5.0;
+    double logp_k = std::log(p) / k;
+    double r = (-k) / std::log(1.0 - std::exp(logp_k));
+    indexOpts.filt_size = static_cast<int32_t>(std::ceil(std::log2(std::ceil(nk * r))));
+    jointLog->info("ntHll estimated {} distinct k-mers, setting filter size to 2^{}", nk, indexOpts.filt_size);
+    /*
+    lgp_k = l($p) / $k
+    r = (-$k) / l(1 - e(lgp_k))
+    ceil(l(ceil($n * r))/l(2))
+    */
+  }
+
+  // Run twopaco
+  twopaco(indexOpts, jointLog, rfile);
 
   {
     std::vector<std::string> args;
@@ -505,11 +552,12 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
       refIdMap[refIds[i]] = i;
       refAccumLengths[i] = prev + refLengths[i];
       prev = refAccumLengths[i];
-//      std::cerr << i << ":" << refLengths[i] << "\n";
+      // std::cerr << i << ":" << refLengths[i] << "\n";
     }
-    //compact 2bit vector
-//    std::cerr << "\nrefAccumLengths.size():" << refAccumLengths.size() << "\n";
-//    std::cerr << refAccumLengths.back() << "\n";
+
+    // compact 2bit vector
+    // std::cerr << "\nrefAccumLengths.size():" << refAccumLengths.size() << "\n";
+    // std::cerr << refAccumLengths.back() << "\n";
     compact::vector<uint64_t, 2> refseq(refAccumLengths.back());
     refseq.clear_mem();
 
@@ -556,8 +604,8 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
   jointLog->info("positional integer width = {:n}", w);
 
   auto& seqVec = pf.getContigSeqVec();
-  auto& rankVec = pf.getRankVec();
-  auto& edgeVec = pf.getEdgeVec() ;
+  auto& rankVec = pf.getRankVec() ;
+  auto& edgeVec = pf.getEdgeVec();
 
  /* compact::vector<uint64_t, 1> rankVec(tlen);
   for(uint64_t i=0; i<tlen; i++) rankVec[i]=0;//if(rankVec[i]!=0) {std::cerr<<"Not zero\n"; break;}
@@ -585,9 +633,6 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
   }
   jointLog->info("num keys (iterator)= {:n}", nkeyIt);
 #endif // PUFFER_DEBUG
- 
-  typedef boomphf::SingleHashFunctor<uint64_t> hasher_t;
-  typedef boomphf::mphf<uint64_t, hasher_t> boophf_t;
 
   auto keyIt = boomphf::range(kb, ke);
   boophf_t* bphf =
@@ -731,12 +776,20 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
     jointLog->info("finished writing dense pufferfish index");
 
   } else if (indexOpts.isSparse) { // sparse index; it's GO time!
-    int extensionSize = indexOpts.extensionSize;
-    int sampleSize = 2 * extensionSize + 1;
-
-
-    // Note: the compact_vector constructor does not
-    // init mem to 0, so we do that with the clear_mem() function.
+    /* SQUISH FISH TIME */
+    pufferfishSparseIndex(indexOpts,
+                          w,
+                          nkeys,
+                          numKmers,
+                          pf,
+                          jointLog,
+                          bphf,
+                          numContigs,
+                          tlen,
+                          keepRef,
+                          haveEdgeVec);
+  } else { // lossy sampling index
+    int32_t sampleSize = static_cast<int32_t>(indexOpts.lossy_rate);
     compact::vector<uint64_t, 1> presenceVec(nkeys);
     presenceVec.clear_mem();
 
@@ -746,12 +799,11 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
     //fill up optimal positions
     {
       auto& cnmap = pf.getContigNameMap() ;
-      size_t ncontig = cnmap.size();
       std::vector<size_t> sampledInds ;
-      for(size_t i = 0; i < ncontig; ++i) {//}auto& kv : cnmap){
-        auto& r1 = cnmap[i];
+      for(auto& kv : cnmap){
+        auto& r1 = kv.second ;
         sampledInds.clear();
-        computeSampledPositions(r1.length, k, sampleSize, sampledInds) ;
+        computeSampledPositionsLossy(r1.length, k, sampleSize, sampledInds) ;
         sampledKmers += sampledInds.size() ;
         contigLengths.push_back(r1.length) ;
       }
@@ -759,30 +811,222 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
       jointLog->info("# skipped kmers = {:n}", numKmers - sampledKmers) ;
     }
 
-    //fill up the vectors
-    uint32_t extSymbolWidth = 2;
-    uint32_t extWidth = std::log2(extensionSize);
-    jointLog->info("extWidth = {}", extWidth);
-
-    compact::vector<uint64_t> auxInfo(extSymbolWidth*extensionSize, (numKmers-sampledKmers));
-    auxInfo.clear_mem();
-
-    compact::vector<uint64_t> extSize(extWidth, (numKmers-sampledKmers));
-    extSize.clear_mem();
-
-    compact::vector<uint64_t, 1> direction(numKmers - sampledKmers) ;
-    direction.clear_mem();
-
-    compact::vector<uint64_t, 1> canonicalNess(numKmers - sampledKmers);
-    canonicalNess.clear_mem();
-
     compact::vector<uint64_t> samplePosVec(w, sampledKmers);
     samplePosVec.clear_mem();
+
+
+
+    // new presence Vec
+    {
+      {
+      jointLog->info("\nFilling presence vector");
+      size_t i = 0 ;
+      ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
+      ContigKmerIterator ke1(&seqVec, &rankVec, k, seqVec.size() - k + 1);
+      size_t contigId{0};
+      int loopCounter = 0;
+      while(kb1 != ke1){
+        sampledInds.clear();
+        auto clen = contigLengths[contigId];
+        computeSampledPositionsLossy(clen, k, sampleSize, sampledInds) ;
+        contigId++;
+        loopCounter++ ;
+
+        my_mer r;
+        auto zeroPos = kb1.pos();
+        auto skipLen = kb1.pos() - zeroPos;
+        auto nextSampIter = sampledInds.begin();
+        bool done = false;
+        
+        for (size_t j = 0; j < clen - k + 1; ++kb1, ++j) {
+          skipLen = kb1.pos() - zeroPos;
+          if (!done and skipLen == static_cast<decltype(skipLen)>(*nextSampIter)) {
+            auto idx = bphf->lookup(*kb1);
+            presenceVec[idx] = 1 ;
+            samplePosVec[i] = kb1.pos();
+            i++;
+            ++nextSampIter;
+            if (nextSampIter == sampledInds.end()) {
+              done = true;
+            }
+          }
+        }
+        if (nextSampIter != sampledInds.end()) {
+          jointLog->info("I didn't sample {:n}, samples for contig {:n}", std::distance(nextSampIter, sampledInds.end()), contigId - 1);
+          jointLog->info("last sample is {:n}", sampledInds.back());
+          jointLog->info("contig length is {:n}", contigLengths[contigId-1]);
+        }
+      }
+      }
+
+      {
+        jointLog->info("\nFilling sampled position vector");
+        size_t i = 0 ;
+        ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
+        ContigKmerIterator ke1(&seqVec, &rankVec, k, seqVec.size() - k + 1);
+        size_t contigId{0};
+        int loopCounter = 0;
+        rank9b realPresenceRank(presenceVec.get(), presenceVec.size());
+        while(kb1 != ke1){
+          sampledInds.clear();
+          auto clen = contigLengths[contigId];
+          computeSampledPositionsLossy(clen, k, sampleSize, sampledInds) ;
+          contigId++;
+          loopCounter++ ;
+
+          my_mer r;
+          auto zeroPos = kb1.pos();
+          auto skipLen = kb1.pos() - zeroPos;
+          auto nextSampIter = sampledInds.begin();
+          bool done = false;
+          
+          for (size_t j = 0; j < clen - k + 1; ++kb1, ++j) {
+            skipLen = kb1.pos() - zeroPos;
+            if (!done and skipLen == static_cast<decltype(skipLen)>(*nextSampIter)) {
+              auto idx = bphf->lookup(*kb1);
+              auto rank = (idx == 0) ? 0 : realPresenceRank.rank(idx);
+              samplePosVec[rank] = kb1.pos();
+              ++i;
+              ++nextSampIter;
+              if (nextSampIter == sampledInds.end()) {
+                done = true;
+              }
+            }
+          }
+          if (nextSampIter != sampledInds.end()) {
+            jointLog->info("I didn't sample {:n}, samples for contig {}", std::distance(nextSampIter, sampledInds.end()), contigId - 1);
+            jointLog->info("last sample is {:n}", sampledInds.back());
+            jointLog->info("contig length is {:n}", contigLengths[contigId-1]);
+          }
+        }
+        jointLog->info("i = {:n}, sampled kmers = {:n}, loops = {:n}, contig array = {:n}",
+                      i, sampledKmers, loopCounter, contigLengths.size());
+      }
+    }
+
+
+    /** Write the index **/
+    std::ofstream descStream(outdir + "/info.json");
+    {
+      cereal::JSONOutputArchive indexDesc(descStream);
+      std::string sampStr = "lossy";
+      std::vector<std::string> refGFA{outdir};
+      indexDesc(cereal::make_nvp("index_version", pufferfish::indexVersion));
+      indexDesc(cereal::make_nvp("reference_gfa", refGFA));
+      indexDesc(cereal::make_nvp("sampling_type", sampStr));
+      indexDesc(cereal::make_nvp("sample_size", sampleSize));
+      indexDesc(cereal::make_nvp("k", k));
+      indexDesc(cereal::make_nvp("num_kmers", nkeys));
+      indexDesc(cereal::make_nvp("num_sampled_kmers",sampledKmers));
+      indexDesc(cereal::make_nvp("num_contigs", numContigs));
+      indexDesc(cereal::make_nvp("seq_length", tlen));
+      indexDesc(cereal::make_nvp("have_ref_seq", keepRef));
+      indexDesc(cereal::make_nvp("have_edge_vec", haveEdgeVec));
+
+      std::ifstream sigStream(outdir + "/ref_sigs.json");
+      cereal::JSONInputArchive sigArch(sigStream);
+      copySigArchive(sigArch, indexDesc);
+      sigStream.close();
+    }
+    descStream.close();
+
+    std::ofstream hstream(outdir + "/" + pufferfish::util::MPH);
+    dumpCompactToFile(presenceVec, outdir + "/presence.bin");
+    dumpCompactToFile(samplePosVec, outdir + "/sample_pos.bin");
+    bphf->save(hstream);
+    hstream.close();
+  }
+
+  // cleanup the fixed.fa file
+  ghc::filesystem::remove(rfile);
+  ghc::filesystem::remove(outdir + "/ref_sigs.json");
+  return 0;
+}
+
+/*****************************************************************************/
+/* Build sparse pufferfish index */
+/*****************************************************************************/
+
+void pufferfishSparseIndex(
+  pufferfish::IndexOptions& indexOpts,
+  size_t w,
+  size_t nkeys,
+  size_t numKmers,
+  pufferfish::BinaryGFAReader& pf, 
+  std::shared_ptr<spdlog::logger>& jointLog, 
+  boophf_t *bphf, //typedef this?
+  size_t numContigs,
+  size_t tlen,
+  bool keepRef,
+  bool haveEdgeVec) 
+{
+  std::string outdir = indexOpts.outdir;
+
+  uint32_t k = indexOpts.k;
+  int extensionSize = indexOpts.extensionSize;
+  int sampleSize = 2 * extensionSize + 1;
+
+  auto& seqVec = pf.getContigSeqVec();
+  auto& rankVec = pf.getRankVec();
+  auto& edgeVec = pf.getEdgeVec();
+
+  // Note: the compact_vector constructor does not
+  // init mem to 0, so we do that with the clear_mem() function.
+  compact::vector<uint64_t, 1> presenceVec(nkeys);
+  presenceVec.clear_mem();
+
+  size_t sampledKmers{0};
+  std::vector<size_t> sampledInds;
+  std::vector<size_t> contigLengths;
+  //fill up optimal positions
+
+  // TODO - get sum of extensions here
+  {
+    // This loop just gets total number of sampled kmers
+    auto& cnmap = pf.getContigNameMap() ;
+    size_t ncontig = cnmap.size();
+    std::vector<size_t> sampledInds ;
+    for(size_t i = 0; i < ncontig; ++i) {//}auto& kv : cnmap){
+      auto& r1 = cnmap[i];
+      sampledInds.clear();
+      computeSampledPositions(r1.length, k, sampleSize, sampledInds) ;
+      sampledKmers += sampledInds.size() ;
+      contigLengths.push_back(r1.length) ;
+    }
+    jointLog->info("# sampled kmers = {:n}", sampledKmers) ;
+    jointLog->info("# skipped kmers = {:n}", numKmers - sampledKmers) ;
+  }
+  // END TODO
+
+  //fill up the vectors
+  uint32_t extSymbolWidth = 2;
+  uint32_t extWidth = std::log2(extensionSize);
+  jointLog->info("extWidth = {}", extWidth);
+
+  // TODO: figure out length of extension table. use iterator over cannonical kmers
+  compact::vector<uint64_t> auxInfo(extSymbolWidth*extensionSize, (numKmers-sampledKmers));
+  auxInfo.clear_mem();
+  // END TODO:
+
+  // TODO: CHANGE extSize to be a rank9b.
+  compact::vector<uint64_t> extSize(extWidth, (numKmers-sampledKmers));
+  extSize.clear_mem();
+  // END TODO
+
+  compact::vector<uint64_t, 1> direction(numKmers - sampledKmers) ;
+  direction.clear_mem();
+
+  compact::vector<uint64_t, 1> canonicalNess(numKmers - sampledKmers);
+  canonicalNess.clear_mem();
+
+  compact::vector<uint64_t> samplePosVec(w, sampledKmers);
+  samplePosVec.clear_mem();
 
   // new presence Vec
     size_t i = 0 ;
     std::unordered_set<uint64_t> indices;
   {
+    //TODO... pull this stuff out into a function?
     jointLog->info("\nFilling presence Vector");
 
     ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
@@ -913,18 +1157,23 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
             auto idx = bphf->lookup(*kb1);
             auto rank = (idx == 0) ? 0 : realPresenceRank.rank(idx);
 
+            // TODO change this to be 
             int64_t target_idx = (idx - rank);
             if ( target_idx > canonicalNess.size()) { jointLog->warn("target_idx = {}, but canonicalNess.size = {}", target_idx, canonicalNess.size()); }
-            canonicalNess[idx - rank] = kb1.isCanonical();
+            canonicalNess[target_idx] = kb1.isCanonical();
 
+            // TODO change this to flag the right bit in extSize (or different name)
             if ( target_idx > extSize.size()) { jointLog->warn("target_idx = {}, but extSize.size = {}", target_idx, extSize.size()); }
-            extSize[idx - rank] = extensionDist;
+            extSize[target_idx] = extensionDist;
+            // END
 
+            // TODO change this to variable length pack the ext
             if ( target_idx > auxInfo.size()) { jointLog->warn("target_idx = {}, but auxInfo.size = {}", target_idx, auxInfo.size()); }
-            auxInfo[idx - rank] = ext;
+            auxInfo[target_idx] = ext;
+            // END TODO
 
             if ( target_idx > direction.size()) { jointLog->warn("target_idx = {}, but direction.size = {}", target_idx, direction.size()); }
-            direction[idx - rank] = (sampDir == NextSampleDirection::FORWARD) ? 1 : 0;
+            direction[target_idx] = (sampDir == NextSampleDirection::FORWARD) ? 1 : 0;
           }
         }
     }
@@ -932,6 +1181,7 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
 
   }
 
+  // TODO: Possible soln: I could compress AuxInfo, and fill in Extension endpoint
 
   /** Write the index **/
   std::ofstream descStream(outdir + "/info.json");
@@ -968,158 +1218,4 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
   dumpCompactToFile(direction, outdir + "/direction.bin");
   bphf->save(hstream);
   hstream.close();
-
-  } else { // lossy sampling index
-    int32_t sampleSize = static_cast<int32_t>(indexOpts.lossy_rate);
-    compact::vector<uint64_t, 1> presenceVec(nkeys);
-    presenceVec.clear_mem();
-
-    size_t sampledKmers{0};
-    std::vector<size_t> sampledInds;
-    std::vector<size_t> contigLengths;
-    //fill up optimal positions
-    {
-      auto& cnmap = pf.getContigNameMap() ;
-      std::vector<size_t> sampledInds ;
-      for(auto& kv : cnmap){
-        auto& r1 = kv.second ;
-        sampledInds.clear();
-        computeSampledPositionsLossy(r1.length, k, sampleSize, sampledInds) ;
-        sampledKmers += sampledInds.size() ;
-        contigLengths.push_back(r1.length) ;
-      }
-      jointLog->info("# sampled kmers = {:n}", sampledKmers) ;
-      jointLog->info("# skipped kmers = {:n}", numKmers - sampledKmers) ;
-    }
-
-    compact::vector<uint64_t> samplePosVec(w, sampledKmers);
-    samplePosVec.clear_mem();
-
-
-
-    // new presence Vec
-    {
-      {
-      jointLog->info("\nFilling presence vector");
-      size_t i = 0 ;
-      ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
-      ContigKmerIterator ke1(&seqVec, &rankVec, k, seqVec.size() - k + 1);
-      size_t contigId{0};
-      int loopCounter = 0;
-      while(kb1 != ke1){
-        sampledInds.clear();
-        auto clen = contigLengths[contigId];
-        computeSampledPositionsLossy(clen, k, sampleSize, sampledInds) ;
-        contigId++;
-        loopCounter++ ;
-
-        my_mer r;
-        auto zeroPos = kb1.pos();
-        auto skipLen = kb1.pos() - zeroPos;
-        auto nextSampIter = sampledInds.begin();
-        bool done = false;
-        
-        for (size_t j = 0; j < clen - k + 1; ++kb1, ++j) {
-          skipLen = kb1.pos() - zeroPos;
-          if (!done and skipLen == static_cast<decltype(skipLen)>(*nextSampIter)) {
-            auto idx = bphf->lookup(*kb1);
-            presenceVec[idx] = 1 ;
-            samplePosVec[i] = kb1.pos();
-            i++;
-            ++nextSampIter;
-            if (nextSampIter == sampledInds.end()) {
-              done = true;
-            }
-          }
-        }
-        if (nextSampIter != sampledInds.end()) {
-          jointLog->info("I didn't sample {:n}, samples for contig {:n}", std::distance(nextSampIter, sampledInds.end()), contigId - 1);
-          jointLog->info("last sample is {:n}", sampledInds.back());
-          jointLog->info("contig length is {:n}", contigLengths[contigId-1]);
-        }
-      }
-      }
-
-      {
-        jointLog->info("\nFilling sampled position vector");
-      size_t i = 0 ;
-      ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
-      ContigKmerIterator ke1(&seqVec, &rankVec, k, seqVec.size() - k + 1);
-      size_t contigId{0};
-      int loopCounter = 0;
-      rank9b realPresenceRank(presenceVec.get(), presenceVec.size());
-      while(kb1 != ke1){
-        sampledInds.clear();
-        auto clen = contigLengths[contigId];
-        computeSampledPositionsLossy(clen, k, sampleSize, sampledInds) ;
-        contigId++;
-        loopCounter++ ;
-
-        my_mer r;
-        auto zeroPos = kb1.pos();
-        auto skipLen = kb1.pos() - zeroPos;
-        auto nextSampIter = sampledInds.begin();
-        bool done = false;
-        
-        for (size_t j = 0; j < clen - k + 1; ++kb1, ++j) {
-          skipLen = kb1.pos() - zeroPos;
-          if (!done and skipLen == static_cast<decltype(skipLen)>(*nextSampIter)) {
-            auto idx = bphf->lookup(*kb1);
-            auto rank = (idx == 0) ? 0 : realPresenceRank.rank(idx);
-            samplePosVec[rank] = kb1.pos();
-            ++i;
-            ++nextSampIter;
-            if (nextSampIter == sampledInds.end()) {
-              done = true;
-            }
-          }
-        }
-        if (nextSampIter != sampledInds.end()) {
-          jointLog->info("I didn't sample {:n}, samples for contig {}", std::distance(nextSampIter, sampledInds.end()), contigId - 1);
-          jointLog->info("last sample is {:n}", sampledInds.back());
-          jointLog->info("contig length is {:n}", contigLengths[contigId-1]);
-        }
-      }
-      jointLog->info("i = {:n}, sampled kmers = {:n}, loops = {:n}, contig array = {:n}",
-                    i, sampledKmers, loopCounter, contigLengths.size());
-
-    }
-    }
-
-    /** Write the index **/
-    std::ofstream descStream(outdir + "/info.json");
-    {
-      cereal::JSONOutputArchive indexDesc(descStream);
-      std::string sampStr = "lossy";
-      std::vector<std::string> refGFA{outdir};
-      indexDesc(cereal::make_nvp("index_version", pufferfish::indexVersion));
-      indexDesc(cereal::make_nvp("reference_gfa", refGFA));
-      indexDesc(cereal::make_nvp("sampling_type", sampStr));
-      indexDesc(cereal::make_nvp("sample_size", sampleSize));
-      indexDesc(cereal::make_nvp("k", k));
-      indexDesc(cereal::make_nvp("num_kmers", nkeys));
-      indexDesc(cereal::make_nvp("num_sampled_kmers",sampledKmers));
-      indexDesc(cereal::make_nvp("num_contigs", numContigs));
-      indexDesc(cereal::make_nvp("seq_length", tlen));
-      indexDesc(cereal::make_nvp("have_ref_seq", keepRef));
-      indexDesc(cereal::make_nvp("have_edge_vec", haveEdgeVec));
-
-      std::ifstream sigStream(outdir + "/ref_sigs.json");
-      cereal::JSONInputArchive sigArch(sigStream);
-      copySigArchive(sigArch, indexDesc);
-      sigStream.close();
-    }
-    descStream.close();
-
-    std::ofstream hstream(outdir + "/" + pufferfish::util::MPH);
-    dumpCompactToFile(presenceVec, outdir + "/presence.bin");
-    dumpCompactToFile(samplePosVec, outdir + "/sample_pos.bin");
-    bphf->save(hstream);
-    hstream.close();
-  }
-
-  // cleanup the fixed.fa file
-  ghc::filesystem::remove(rfile);
-  ghc::filesystem::remove(outdir + "/ref_sigs.json");
-  return 0;
 }
