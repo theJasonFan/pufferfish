@@ -97,7 +97,7 @@ public:
 private:
   auto getRefPosHelper_(CanonicalKmer& mer, uint64_t pos, bool didWalk = false) -> pufferfish::util::ProjectedHits;
   auto getRefPosHelper_(CanonicalKmer& mer, uint64_t pos, pufferfish::util::QueryCache& qc, bool didWalk = false) -> pufferfish::util::ProjectedHits;
-  auto getExtension(uint64_t i) -> uint64_t;
+  auto getExtension(uint64_t i) -> std::pair<uint64_t, uint64_t>;
 };
 
 #endif // _PUFFERFISH_INDEX_HPP_

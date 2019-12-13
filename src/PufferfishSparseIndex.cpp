@@ -415,8 +415,9 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern, pufferfish::util::Quer
 
     auto extensionPos = idx - currRank;
     //uint64_t extensionWord = auxInfo_[extensionPos];
-    uint64_t extensionWord = getExtension(extensionPos);
-
+    auto extInfo = getExtension(extensionPos);
+    auto extensionWord = extInfo.first;
+    auto thisExtSize = extInfo.second;
 
     if (!canonicalNess_[extensionPos] and mer.isFwCanonical()) {
       mer.swap();
@@ -425,7 +426,7 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern, pufferfish::util::Quer
     bool shiftFw = (directionVec_[extensionPos] == 1);
     // + 1 because we encode 1 as 00, 2 as 01, etc.
     int32_t llimit =
-        extensionSize_ - static_cast<int32_t>(extSize_[extensionPos] + 1);
+        extensionSize_ - static_cast<int32_t>(thisExtSize);
 
     if (shiftFw) {
       for (int32_t i = extensionSize_; i > llimit; --i) {
@@ -518,7 +519,9 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
 
     auto extensionPos = idx - currRank;
     //uint64_t extensionWord = auxInfo_[extensionPos];
-    uint64_t extensionWord = getExtension(extensionPos);
+    auto extInfo = getExtension(extensionPos);
+    auto extensionWord = extInfo.first;
+    auto thisExtSize = extInfo.second;
 
 
     if (!canonicalNess_[extensionPos] and mer.isFwCanonical()) {
@@ -528,7 +531,7 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
     bool shiftFw = (directionVec_[extensionPos] == 1);
     // + 1 because we encode 1 as 00, 2 as 01, etc.
     int32_t llimit =
-        extensionSize_ - static_cast<int32_t>(extSize_[extensionPos] + 1);
+        extensionSize_ - static_cast<int32_t>(thisExtSize);
 
     if (shiftFw) {
       for (int32_t i = extensionSize_; i > llimit; --i) {
@@ -573,7 +576,7 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
   return getRefPosHelper_(mern, pos, didWalk);
 }
 
-auto PufferfishSparseIndex::getExtension(uint64_t i) -> uint64_t 
+auto PufferfishSparseIndex::getExtension(uint64_t i) -> std::pair<uint64_t, uint64_t>
 {
   auto idx = extBoundariesSel_.select(i);
   uint64_t extLen = 0;
@@ -585,5 +588,5 @@ auto PufferfishSparseIndex::getExtension(uint64_t i) -> uint64_t
   }
   auto ext = extTable_.get_int(idx*2, extLen*2);
   ext = ext << ((extensionSize_ - extLen)*2);
-  return ext;
+  return std::make_pair(ext, extLen);
 }
