@@ -42,12 +42,31 @@ PufferfishSparseIndex::PufferfishSparseIndex(const std::string& indexDir, puffer
   
   // std::cerr << "loading contig table ... ";
   {
+    // CLI::AutoTimer timer{"Loading contig table", CLI::Timer::Big};
+    // std::ifstream contigTableStream(indexDir + "/" + pufferfish::util::CTABLE);
+    // cereal::BinaryInputArchive contigTableArchive(contigTableStream);
+    // contigTableArchive(refNames_);
+    // contigTableArchive(refExt_);
+    // contigTableArchive(contigTable_);
+    // contigTableStream.close();
+
     CLI::AutoTimer timer{"Loading contig table", CLI::Timer::Big};
     std::ifstream contigTableStream(indexDir + "/" + pufferfish::util::CTABLE);
     cereal::BinaryInputArchive contigTableArchive(contigTableStream);
     contigTableArchive(refNames_);
     contigTableArchive(refExt_);
-    contigTableArchive(contigTable_);
+
+    std::string pfile = indexDir + "/" + pufferfish::util::UREFTABLE;
+    auto bits_per_element = compact::get_bits_per_element(pfile);
+    urefTable_.set_m_bits(bits_per_element);
+    urefTable_.deserialize(pfile, false);
+
+    pfile = indexDir + "/" + pufferfish::util::UPOSTABLE;
+    bits_per_element = compact::get_bits_per_element(pfile);
+    uposTable_.set_m_bits(bits_per_element);
+    uposTable_.deserialize(pfile, false);
+
+//    contigTableArchive(contigTable_);
     contigTableStream.close();
   }
   {
@@ -198,7 +217,7 @@ PufferfishSparseIndex::PufferfishSparseIndex(const std::string& indexDir, puffer
 auto PufferfishSparseIndex::getRefPosHelper_(CanonicalKmer& mer, uint64_t pos,
                                              pufferfish::util::QueryCache& qc, bool didWalk)
     -> pufferfish::util::ProjectedHits {
-  using IterT = std::vector<pufferfish::util::Position>::iterator;
+  using IterT = pufferfish::util::PositionIterator;
   if (pos <= lastSeqPos_) {
     uint64_t fk = seq_.get_int(2*pos, 2*k_);
     // say how the kmer fk matches mer; either
@@ -281,7 +300,7 @@ auto PufferfishSparseIndex::getRefPosHelper_(CanonicalKmer& mer, uint64_t pos,
                                              bool didWalk)
     -> pufferfish::util::ProjectedHits {
 
-  using IterT = std::vector<pufferfish::util::Position>::iterator;
+  using IterT = pufferfish::util::PositionIterator;
   if (pos <= lastSeqPos_) {
     uint64_t fk = seq_.get_int(2*pos, 2*k_);
     // say how the kmer fk matches mer; either
@@ -351,7 +370,7 @@ auto PufferfishSparseIndex::getRefPosHelper_(CanonicalKmer& mer, uint64_t pos,
 
 auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern, pufferfish::util::QueryCache& qc)
     -> pufferfish::util::ProjectedHits {
-  using IterT = std::vector<pufferfish::util::Position>::iterator;
+  using IterT = pufferfish::util::PositionIterator;
   pufferfish::util::ProjectedHits emptyHit{std::numeric_limits<uint32_t>::max(),
                                std::numeric_limits<uint64_t>::max(),
                                std::numeric_limits<uint32_t>::max(),
@@ -455,7 +474,7 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern, pufferfish::util::Quer
 
 auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
     -> pufferfish::util::ProjectedHits {
-  using IterT = std::vector<pufferfish::util::Position>::iterator;
+  using IterT = pufferfish::util::PositionIterator;
   pufferfish::util::ProjectedHits emptyHit{std::numeric_limits<uint32_t>::max(),
                                std::numeric_limits<uint64_t>::max(),
                                std::numeric_limits<uint32_t>::max(),
