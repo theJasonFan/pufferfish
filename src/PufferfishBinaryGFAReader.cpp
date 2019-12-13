@@ -285,8 +285,8 @@ namespace pufferfish {
                         .push_back(pufferfish::util::Position(tr, pos, contigs[i].second));
                 totalUtabElements++;
             }
+            maxRefLength = pos > maxRefLength ? pos : maxRefLength;
         }
-        maxRefLength = pos > maxRefLength ? pos : maxRefLength;
         logger_->info("\nTotal # of segments we have position for : {:n}", total_output_lines);
     }
 
@@ -396,8 +396,8 @@ namespace pufferfish {
             cpos_offsets[0] = 0;
 
             uint64_t uidx{0};
-            uint32_t refWidth{static_cast<uint32_t >(std::ceil(std::log2(refLengths.size())))},
-            posWidth{static_cast<uint32_t >(std::ceil(std::log2(maxRefLength))+1)};
+            uint32_t refWidth{static_cast<uint32_t >(std::ceil(std::log2(refLengths.size() + 1)))},
+            posWidth{static_cast<uint32_t >(std::ceil(std::log2(maxRefLength + 1))+1)};
             unitigRef_.set_m_bits(refWidth);
             unitigRef_.resize(totalUtabElements);
             unitigPos_.set_m_bits(posWidth);

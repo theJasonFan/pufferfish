@@ -42,12 +42,31 @@ PufferfishSparseIndex::PufferfishSparseIndex(const std::string& indexDir, puffer
   
   // std::cerr << "loading contig table ... ";
   {
+    // CLI::AutoTimer timer{"Loading contig table", CLI::Timer::Big};
+    // std::ifstream contigTableStream(indexDir + "/" + pufferfish::util::CTABLE);
+    // cereal::BinaryInputArchive contigTableArchive(contigTableStream);
+    // contigTableArchive(refNames_);
+    // contigTableArchive(refExt_);
+    // contigTableArchive(contigTable_);
+    // contigTableStream.close();
+
     CLI::AutoTimer timer{"Loading contig table", CLI::Timer::Big};
     std::ifstream contigTableStream(indexDir + "/" + pufferfish::util::CTABLE);
     cereal::BinaryInputArchive contigTableArchive(contigTableStream);
     contigTableArchive(refNames_);
     contigTableArchive(refExt_);
-    contigTableArchive(contigTable_);
+
+    std::string pfile = indexDir + "/" + pufferfish::util::UREFTABLE;
+    auto bits_per_element = compact::get_bits_per_element(pfile);
+    urefTable_.set_m_bits(bits_per_element);
+    urefTable_.deserialize(pfile, false);
+
+    pfile = indexDir + "/" + pufferfish::util::UPOSTABLE;
+    bits_per_element = compact::get_bits_per_element(pfile);
+    uposTable_.set_m_bits(bits_per_element);
+    uposTable_.deserialize(pfile, false);
+
+//    contigTableArchive(contigTable_);
     contigTableStream.close();
   }
   {
