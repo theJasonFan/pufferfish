@@ -580,7 +580,7 @@ auto PufferfishSparseIndex::getExtension(uint64_t i) -> std::pair<uint64_t, uint
 {
   auto idx = extBoundariesSel_.select(i);
   uint64_t extLen = 0;
-  if (i == (extBoundaries_.size() - 1)) {
+  if (i == (numSampledKmers_ - 1)) {
     extLen = extBoundaries_.size() - idx;
     std::cout << idx*2 << extLen*2 << std::endl;
   } else {
