@@ -22,6 +22,7 @@
 #include "cereal/archives/json.hpp"
 #include "jellyfish/mer_dna.hpp"
 #include "rank9b.hpp"
+#include "rank9sel.hpp"
 #include "spdlog/spdlog.h"
 #include "Kmer.hpp" // currently requires k <= 32
 #include "compact_vector/compact_vector.hpp"
@@ -946,6 +947,17 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
 /*****************************************************************************/
 /* Build sparse pufferfish index */
 /*****************************************************************************/
+/*
+    Initialize an extSize log(e) width, with length n (# of kmers)
+        fill out isSamp
+        fill out extSize
+        calculate total size of rank bv
+    loop over extSize:
+        fill rank_bv
+    loop over contig table:
+        idx = lookup(kmer)
+        extVar[rank_bv[idx-rank(isSamp(idx))]]
+*/
 
 void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
                             size_t w,
@@ -978,10 +990,8 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   std::vector<size_t> sampledInds;
   std::vector<size_t> contigLengths;
   //fill up optimal positions
-
-  // TODO - get sum of extensions here
+  // Fill (mutate) sampleInds and compute total sampledKmers
   {
-    // This loop just gets total number of sampled kmers
     auto& cnmap = pf.getContigNameMap() ;
     size_t ncontig = cnmap.size();
     std::vector<size_t> sampledInds ;
@@ -995,22 +1005,17 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
     jointLog->info("# sampled kmers = {:n}", sampledKmers) ;
     jointLog->info("# skipped kmers = {:n}", numKmers - sampledKmers) ;
   }
-  // END TODO
 
   //fill up the vectors
   uint32_t extSymbolWidth = 2;
   uint32_t extWidth = std::log2(extensionSize);
   jointLog->info("extWidth = {}", extWidth);
 
-  // TODO: figure out length of extension table. use iterator over cannonical kmers
   compact::vector<uint64_t> auxInfo(extSymbolWidth*extensionSize, (numKmers-sampledKmers));
   auxInfo.clear_mem();
-  // END TODO:
 
-  // TODO: CHANGE extSize to be a rank9b.
   compact::vector<uint64_t> extSize(extWidth, (numKmers-sampledKmers));
   extSize.clear_mem();
-  // END TODO
 
   compact::vector<uint64_t, 1> direction(numKmers - sampledKmers) ;
   direction.clear_mem();
@@ -1022,10 +1027,9 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   samplePosVec.clear_mem();
 
   // new presence Vec
-    size_t i = 0 ;
-    std::unordered_set<uint64_t> indices;
+  size_t i = 0 ;
+  std::unordered_set<uint64_t> indices;
   {
-    //TODO... pull this stuff out into a function?
     jointLog->info("\nFilling presence Vector");
 
     ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
@@ -1083,7 +1087,8 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   rank9b realPresenceRank(presenceVec.get(), presenceVec.size());
   jointLog->info("num ones in presenceVec = {:n}, i = {:n}, indices.size() = {:n}", realPresenceRank.rank(presenceVec.size()-1), i, indices.size());
 
-  //bidirectional sampling
+  //bidirectional sampling - old
+  size_t totalExtSize = 0;
   {
 
     ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
@@ -1118,7 +1123,7 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
           int64_t prevSampPos = (prevSampIter != sampledInds.end()) ? *prevSampIter : -1;
           uint64_t distToNext = (nextSampPos >= 0) ? nextSampPos - j : std::numeric_limits<uint64_t>::max();
           uint64_t distToPrev = (prevSampPos >= 0) ? j - prevSampPos : std::numeric_limits<uint64_t>::max();
-
+          
           if (distToNext == std::numeric_limits<uint64_t>::max() and
               distToPrev == std::numeric_limits<uint64_t>::max()) {
             jointLog->error("Could not find valid sample position, should not happen!");
@@ -1156,14 +1161,14 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
             auto idx = bphf->lookup(*kb1);
             auto rank = (idx == 0) ? 0 : realPresenceRank.rank(idx);
 
-            // TODO change this to be 
-            int64_t target_idx = (idx - rank);
+            uint64_t target_idx = idx - rank;
             if ( target_idx > canonicalNess.size()) { jointLog->warn("target_idx = {}, but canonicalNess.size = {}", target_idx, canonicalNess.size()); }
             canonicalNess[target_idx] = kb1.isCanonical();
 
             // TODO change this to flag the right bit in extSize (or different name)
             if ( target_idx > extSize.size()) { jointLog->warn("target_idx = {}, but extSize.size = {}", target_idx, extSize.size()); }
             extSize[target_idx] = extensionDist;
+            totalExtSize += extensionDist + 1; // extensionDist encodes (len - 1) to save one bit
             // END
 
             // TODO change this to variable length pack the ext
@@ -1176,8 +1181,118 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
           }
         }
     }
+  }
+
+  
+  // Populate extension boundaries
+  compact::vector<uint64_t, 1> extBoundaries(totalExtSize);
+  extBoundaries.clear_mem();
+  {
+    size_t next_boundary = 0; //The index of the next boundary
+    for (uint64_t i = 0; i < extSize.size(); i++) {
+      extBoundaries[next_boundary] = 1;
+      next_boundary += extSize[i] + 1;
+    }
+  }
+  rank9sel extBoundariesRank(&extBoundaries, extBoundaries.size());
 
 
+  // {
+  //   uint64_t len_0 = extBoundariesRank.select(2) - extBoundariesRank.select(1);
+  //   if (len_0 != extSize[0] + 1) {
+  //     std::cout <<
+  //       len_0 << ' ' <<
+  //       extSize[0] + 1 << ' ' <<
+  //       extBoundariesRank.select(0) << ' ' <<
+  //       extBoundariesRank.select(1) <<' ' << '\n';
+  //   }
+  //   exit(1);
+
+  // }
+
+  compact::vector<uint64_t, 2> extTable(totalExtSize);
+  extTable.clear_mem();
+  //Populate the extension table
+  {
+    ContigKmerIterator kb1(&seqVec, &rankVec, k, 0);
+    ContigKmerIterator ke1(&seqVec, &rankVec, k, seqVec.size() - k + 1);
+
+    size_t contigId{0} ;
+    //size_t coveredKeys{0} ;
+    size_t totalKmersIshouldSee{0} ;
+
+    // For every valid k-mer (i.e. every contig)
+    while(kb1 != ke1){
+      sampledInds.clear();
+      auto clen = contigLengths[contigId];
+      auto thisContigLength = clen;
+      computeSampledPositions(clen, k, sampleSize, sampledInds) ;
+      totalKmersIshouldSee += (thisContigLength - k + 1);
+
+      contigId++ ;
+    
+      my_mer r;
+
+      auto zeroPos = kb1.pos();
+      auto nextSampIter = sampledInds.begin();
+      auto prevSampIter = sampledInds.end();
+      auto skipLen = kb1.pos() - zeroPos;
+      NextSampleDirection sampDir = NextSampleDirection::FORWARD;
+      bool done = false;
+      for (size_t j = 0; j < clen - k + 1; ++kb1, ++j) {
+        int64_t nextSampPos = (nextSampIter != sampledInds.end()) ? *nextSampIter : -1;
+        int64_t prevSampPos = (prevSampIter != sampledInds.end()) ? *prevSampIter : -1;
+        uint64_t distToNext = (nextSampPos >= 0) ? nextSampPos - j : std::numeric_limits<uint64_t>::max();
+        uint64_t distToPrev = (prevSampPos >= 0) ? j - prevSampPos : std::numeric_limits<uint64_t>::max();
+
+        if (distToNext == std::numeric_limits<uint64_t>::max() and
+            distToPrev == std::numeric_limits<uint64_t>::max()) {
+          jointLog->error("Could not find valid sample position, should not happen!");
+          std::exit(1);
+        }
+
+        sampDir = (distToNext < distToPrev) ? NextSampleDirection::FORWARD : NextSampleDirection::REVERSE;
+        skipLen = kb1.pos() - zeroPos;
+        // If this is a sampled position
+        if (!done and skipLen == static_cast<decltype(skipLen)>(*nextSampIter)) {
+          prevSampIter = nextSampIter;
+          ++nextSampIter;
+          if (nextSampIter == sampledInds.end()) {
+            done = true;
+          }
+        } else { // not a sampled position
+          uint32_t ext = 0;
+          size_t firstSampPos = 0;
+          uint32_t extensionDist = 0;
+          if (sampDir == NextSampleDirection::FORWARD) {
+            firstSampPos = zeroPos + j + k;
+            extensionDist = distToNext - 1;
+            ext = getEncodedExtension(seqVec, firstSampPos, distToNext, extensionSize, sampDir);
+          } else if (sampDir == NextSampleDirection::REVERSE) {
+            firstSampPos = zeroPos + prevSampPos;
+            extensionDist = distToPrev - 1;
+            ext = getEncodedExtension(seqVec, firstSampPos, distToPrev, extensionSize, sampDir);
+          } else {
+            std::cerr << "Error during extension encoding, should not happen!\n";
+            std::exit(1);
+          }
+          uint64_t idx = bphf->lookup(*kb1);
+          uint64_t rank = (idx == 0) ? 0 : realPresenceRank.rank(idx);
+
+          uint64_t ith_ext = idx - rank; //ith extension
+          
+          uint64_t thisExtSize = extSize[ith_ext] + 1; // length of extension
+          uint64_t target_idx = extBoundariesRank.select(ith_ext);
+          
+          //extTable.set_int(target_idx, ext, thisExtSize) //set_int not implemented...
+          for (auto i = 0; i < thisExtSize; i++) {
+            auto base = (ext >> ((extensionSize - thisExtSize)*2)) & 3u;
+            extTable[target_idx + i] = base;
+            ext = ext >> 2;
+          }
+        }
+      }
+    }
   }
 
   /** Write the index **/
@@ -1209,10 +1324,71 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   std::ofstream hstream(outdir + "/mphf.bin");
   dumpCompactToFile(presenceVec, outdir+"/presence.bin");
   dumpCompactToFile(samplePosVec, outdir + "/sample_pos.bin");
-  dumpCompactToFile(auxInfo, outdir + "/extension.bin");
-  dumpCompactToFile(extSize, outdir + "/extensionSize.bin");
+
   dumpCompactToFile(canonicalNess, outdir + "/canonical.bin");
   dumpCompactToFile(direction, outdir + "/direction.bin");
+
+  // old stuff
+  dumpCompactToFile(auxInfo, outdir + "/extension.bin");
+  dumpCompactToFile(extSize, outdir + "/extensionSize.bin");
+  //
+
+  // new stuff
+  dumpCompactToFile(extTable, outdir + "/extension_bitpacked.bin");
+  dumpCompactToFile(extBoundaries, outdir + "/extension_boundaries.bin");
+  //
+
+  {
+  // Sanity check, make sure that all the extensions are the same.
+  for (auto i = 0; i < auxInfo.size(); i++) {
+    auto ext1 = auxInfo[i];
+
+    auto targetidx = extBoundariesRank.select(i);
+    uint64_t extLen = 0;
+    if (i == (auxInfo.size() - 1)) {
+      extLen = extBoundaries.size() - targetidx;
+    } else {
+      extLen = extBoundariesRank.select(i + 1) - targetidx;
+    }
+
+    // std::cout<< extLen << ' '<< i << '\n';
+    auto ext2 = extTable.get_int(targetidx, extLen);
+    if (extLen > extensionSize) {
+      std::cout<<"error " << extLen << ' '<< i << '\n';
+      exit(1);
+    }
+
+    if (extLen != (extSize[i] + 1)) {
+      std::cout<<"len error " << i << '\n';
+      std::cout<< "new: " << extLen << " old: " << extSize[i] + 1 << '\n';
+      exit(1);
+    }
+  }
+  std::cout<< "LENGTHS OK" << '\n';
+
+  for (auto i = 0; i < auxInfo.size(); i++) {
+    uint64_t ext1 = auxInfo[i];
+    ext1 = ext1 >> (2*extensionSize - 2*(extSize[i] + 1));
+
+    auto targetidx = extBoundariesRank.select(i);
+    uint64_t extLen = 0;
+    if (i == (auxInfo.size() - 1)) {
+      extLen = extBoundaries.size() - targetidx;
+    } else {
+      extLen = extBoundariesRank.select(i + 1) - targetidx;
+    }
+
+    auto ext2 = extTable.get_int(targetidx*2, extLen*2);
+
+    if (ext1 != ext2) {
+      std::cout<<"word error " << i << '\n';
+      std::cout<< "new: " << ext2 << " old: " << ext1 << '\n';
+      exit(1);
+    }
+  }
+  std::cout<< "EXT OK" << '\n';
+  }
+
   bphf->save(hstream);
   hstream.close();
 }
