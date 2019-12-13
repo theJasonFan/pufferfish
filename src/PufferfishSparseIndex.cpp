@@ -174,6 +174,20 @@ PufferfishSparseIndex::PufferfishSparseIndex(const std::string& indexDir, puffer
     extSize_.deserialize(pfileSize, false);
   }
 
+  /** CHANGED **/
+  {
+    CLI::AutoTimer timer{"Loading extension (variable length) vector", CLI::Timer::Big};
+    std::string pfile = indexDir + "/" + pufferfish::util::EXTENSION_BITPACKED;
+    auto bits_per_element = compact::get_bits_per_element(pfile);
+    extTable_.set_m_bits(bits_per_element);
+    extTable_.deserialize(pfile, false);
+
+    std::string pfileBoundaries = indexDir + "/" + pufferfish::util::EXTENSION_BOUNDARIES;
+    extBoundaries_.deserialize(pfileBoundaries, false);
+    extBoundariesSel_ = rank9sel(&extBoundaries_, extBoundaries_.size());
+  }
+  /** END**/
+
   {
     CLI::AutoTimer timer{"Loading direction vector", CLI::Timer::Big};
     std::string pfile = indexDir + "/" + pufferfish::util::DIRECTION;
@@ -381,7 +395,9 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern, pufferfish::util::Quer
     */
 
     auto extensionPos = idx - currRank;
-    uint64_t extensionWord = auxInfo_[extensionPos];
+    //uint64_t extensionWord = auxInfo_[extensionPos];
+    uint64_t extensionWord = getExtension(extensionPos);
+
 
     if (!canonicalNess_[extensionPos] and mer.isFwCanonical()) {
       mer.swap();
@@ -482,7 +498,9 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
     */
 
     auto extensionPos = idx - currRank;
-    uint64_t extensionWord = auxInfo_[extensionPos];
+    //uint64_t extensionWord = auxInfo_[extensionPos];
+    uint64_t extensionWord = getExtension(extensionPos);
+
 
     if (!canonicalNess_[extensionPos] and mer.isFwCanonical()) {
       mer.swap();
@@ -534,4 +552,19 @@ auto PufferfishSparseIndex::getRefPos(CanonicalKmer mern)
   }
   // end of sampling based pos detection
   return getRefPosHelper_(mern, pos, didWalk);
+}
+
+auto PufferfishSparseIndex::getExtension(uint64_t i) -> uint64_t 
+{
+  auto idx = extBoundariesSel_.select(i);
+  uint64_t extLen = 0;
+  if (i == (extBoundaries_.size() - 1)) {
+    extLen = extBoundaries_.size() - idx;
+    std::cout << idx*2 << extLen*2 << std::endl;
+  } else {
+    extLen = extBoundariesSel_.select(i + 1) - idx;
+  }
+  auto ext = extTable_.get_int(idx*2, extLen*2);
+  ext = ext << ((extensionSize_ - extLen)*2);
+  return ext;
 }

@@ -58,6 +58,12 @@ private:
   compact::vector<uint64_t> auxInfo_{16};
   pos_vector_t sampledPos_{16};
 
+  /** CHANGED **/
+  compact::vector<uint64_t> extTable_{16};
+  bit_vector_t extBoundaries_;
+  rank9sel extBoundariesSel_;
+  /** end **/
+
   std::unique_ptr<boophf_t> hash_{nullptr};
   uint64_t numDecoys_{0};
   uint64_t firstDecoyIndex_{0};
@@ -89,7 +95,7 @@ public:
 private:
   auto getRefPosHelper_(CanonicalKmer& mer, uint64_t pos, bool didWalk = false) -> pufferfish::util::ProjectedHits;
   auto getRefPosHelper_(CanonicalKmer& mer, uint64_t pos, pufferfish::util::QueryCache& qc, bool didWalk = false) -> pufferfish::util::ProjectedHits;
-
+  auto getExtension(uint64_t i) -> uint64_t;
 };
 
 #endif // _PUFFERFISH_INDEX_HPP_
