@@ -27,11 +27,12 @@
 #include <cstdlib>
 #include <clocale>
 #include <ghc/filesystem.hpp>
-//#include <cereal/archives/json.hpp>
+#include <cereal/archives/json.hpp>
 
 #include "PufferfishConfig.hpp"
 #include "ProgOpts.hpp"
 #include "Util.hpp"
+
 //#include "IndexHeader.hpp"
 
 int pufferfishIndex(pufferfish::IndexOptions& indexOpts); // int argc, char* argv[]);
@@ -77,10 +78,11 @@ int main(int argc, char* argv[]) {
           std::string e = s + " is not a directory containing index files.";
           throw std::runtime_error{e};
       }
-      for (auto & elem : {pufferfish::util::MPH,
+
+	  for (auto & elem : {pufferfish::util::INFO,
+                          pufferfish::util::MPH,
                           pufferfish::util::SEQ,
                           pufferfish::util::RANK,
-                          pufferfish::util::POS,
                           pufferfish::util::CTABLE,
                           pufferfish::util::REFSEQ,
                           pufferfish::util::REFNAME,
@@ -92,6 +94,30 @@ int main(int argc, char* argv[]) {
               throw std::runtime_error{e};
           }
       }
+      std::string indexType;
+      {
+          std::ifstream infoStream(s + pufferfish::util::INFO);
+          cereal::JSONInputArchive infoArchive(infoStream);
+          infoArchive(cereal::make_nvp("sampling_type", indexType));
+          infoStream.close();
+          if (indexType == "dense") {
+              if (!ghc::filesystem::exists(s+"/"+pufferfish::util::POS)) {
+                  std::string e = "Index is incomplete. Missing file " + std::string(pufferfish::util::POS);
+                  throw std::runtime_error{e};
+              }
+          } else if (indexType == "sparse") {
+              for (auto & elem : {pufferfish::util::EXTENSION_BITPACKED,
+                                  pufferfish::util::EXTENSION_BOUNDARIES,
+                                  pufferfish::util::SAMPLEPOS}) {
+                  if (!ghc::filesystem::exists(s+"/"+elem)) {
+                      std::string e = "Index is incomplete. Missing file ";
+                      e+=elem;
+                      throw std::runtime_error{e};
+                  }
+              }
+          }
+      }
+ 
       return true;
   };
 

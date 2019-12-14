@@ -478,7 +478,39 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
 
   // running fixFasta
   // Return path rfile with the new fixed fasta file
-  rfile = fixFasta(indexOpts, jointLog, refIdExtensions, shortRefsNameLen);
+  //rfile = fixFasta(indexOpts, jointLog, refIdExtensions, shortRefsNameLen);
+ 
+  //old bloc
+  {
+    jointLog->info("Running fixFasta");
+    std::vector<std::string> args;
+//    args.push_back("fixFasta");
+    if (!indexOpts.decoy_file.empty()) {
+      args.push_back("--decoys");
+      args.push_back(indexOpts.decoy_file);
+    }
+    if (!indexOpts.header_sep.empty()) {
+      args.push_back("--headerSep");
+      args.push_back(indexOpts.header_sep);
+    }
+    if (indexOpts.keep_duplicates) {
+      args.push_back("--keepDuplicates");
+    }
+    args.push_back("--klen");
+    args.push_back(std::to_string(k));
+    args.push_back("--input");
+    args.insert(args.end(), rfiles.begin(), rfiles.end());
+    args.push_back("--output");
+    args.push_back(outdir+"/ref_k"+std::to_string(k)+"_fixed.fa");
+
+    int ffres = fixFastaMain(args, refIdExtensions, shortRefsNameLen, jointLog);
+    if (ffres != 0) {
+        jointLog->error("The fixFasta phase failed with exit code {}", ffres);
+        std::exit(ffres);
+    }
+    // replacing rfile with the new fixed fasta file
+    rfile = outdir+"/ref_k"+std::to_string(k)+"_fixed.fa";
+  }
 
   // If the filter size isn't set by the user, estimate it with ntCard
   if (indexOpts.filt_size == -1){
@@ -498,8 +530,48 @@ int pufferfishIndex(pufferfish::IndexOptions& indexOpts) {
   }
 
   // Run twopaco
-  twopaco(indexOpts, jointLog, rfile);
+  //twopaco(indexOpts, jointLog, rfile);
 
+  {
+    std::vector<std::string> args;
+    args.push_back("twopaco");
+    args.push_back("-k");
+    args.push_back(std::to_string(k));
+    args.push_back("-t");
+    args.push_back(std::to_string(indexOpts.p));
+    args.push_back("-f");
+    args.push_back(std::to_string(indexOpts.filt_size));
+    args.push_back("--outfile");
+    args.push_back(outdir+"/tmp_dbg.bin");
+    args.push_back("--tmpdir");
+
+    std::string twopaco_tmp_path = indexOpts.twopaco_tmp_dir;
+    // if the tmp path wasn't set, then use a subdirectory 
+    // of the index directory (that we will later remove).
+    if (twopaco_tmp_path.empty()) {
+      twopaco_tmp_path = outdir + "/twopaco_tmp";
+    } 
+
+    // create the tmp directory if we need to (and can). Complain and exit
+    // if the user passed an existing file as the target path. 
+    if (ghc::filesystem::exists(twopaco_tmp_path.c_str())) {
+        if (!ghc::filesystem::is_directory(twopaco_tmp_path.c_str())) {
+            jointLog->error("{} exists as a file. Cannot create a directory of the same name.", twopaco_tmp_path.c_str());
+            jointLog->flush();
+            std::exit(1);
+        }
+    } else {
+        ghc::filesystem::create_directories(twopaco_tmp_path.c_str());
+    }
+    args.push_back(twopaco_tmp_path);
+
+    args.push_back(rfile);
+    buildGraphMain(args);
+
+    // cleanup tmp
+    ghc::filesystem::remove_all(twopaco_tmp_path);
+  }
+  
   {
     std::vector<std::string> args;
     args.push_back("graphdump");
