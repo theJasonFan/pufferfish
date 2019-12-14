@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
       }
       std::string indexType;
       {
-          std::ifstream infoStream(s + pufferfish::util::INFO);
+          std::ifstream infoStream(s + "/" + pufferfish::util::INFO);
           cereal::JSONInputArchive infoArchive(infoStream);
           infoArchive(cereal::make_nvp("sampling_type", indexType));
           infoStream.close();
