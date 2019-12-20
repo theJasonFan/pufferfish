@@ -1394,6 +1394,8 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   descStream.close();
 
   std::ofstream hstream(outdir + "/mphf.bin");
+  bphf->save(hstream);
+  hstream.close();
   dumpCompactToFile(presenceVec, outdir+"/presence.bin");
   dumpCompactToFile(samplePosVec, outdir + "/sample_pos.bin");
 
@@ -1411,16 +1413,21 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
   //
 
   {
-  // Sanity check, make sure that all the extensions are the same.
-  for (auto i = 0; i < auxInfo.size(); i++) {
+
+/*        rank9b _bv(extBoundaries.get(), extBoundaries.size());
+		  std::cerr << "auxInfo.size(): " << auxInfo.size() << "\n";
+		  std::cerr << "# 1s in boundary: " << _bv.rank(extBoundaries.size() - 1) << "\n";
+for (auto i = 0; i < auxInfo.size(); i++) {
     auto ext1 = auxInfo[i];
 
     auto targetidx = extBoundariesRank.select(i);
     uint64_t extLen = 0;
     if (i == (auxInfo.size() - 1)) {
       extLen = extBoundaries.size() - targetidx;
+		std::cerr <<"last: " <<  i << " " << targetidx << " " << extLen << "\n";
     } else {
       extLen = extBoundariesRank.select(i + 1) - targetidx;
+		std::cerr << i << " " << targetidx << " " << extLen << "\n";
     }
 
     // std::cout<< extLen << ' '<< i << '\n';
@@ -1459,8 +1466,7 @@ void pufferfishSparseIndex(pufferfish::IndexOptions& indexOpts,
     }
   }
   std::cout<< "EXT OK" << '\n';
+  */
   }
-
-  bphf->save(hstream);
-  hstream.close();
 }
+
