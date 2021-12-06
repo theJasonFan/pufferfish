@@ -181,17 +181,17 @@ PufferfishSparseIndex::PufferfishSparseIndex(const std::string& indexDir, puffer
     sampledPos_.deserialize(pfile, false);
   }
 
-  {
-    CLI::AutoTimer timer{"Loading extension vector", CLI::Timer::Big};
-    std::string pfile = indexDir + "/" + pufferfish::util::EXTENSION;
-    auto bits_per_element = compact::get_bits_per_element(pfile);
-    auxInfo_.set_m_bits(bits_per_element);
-    auxInfo_.deserialize(pfile, false);
-    std::string pfileSize = indexDir + "/" + pufferfish::util::EXTENSIONSIZE;
-    bits_per_element = compact::get_bits_per_element(pfileSize);
-    extSize_.set_m_bits(bits_per_element);
-    extSize_.deserialize(pfileSize, false);
-  }
+  // {
+  //   CLI::AutoTimer timer{"Loading extension vector", CLI::Timer::Big};
+  //   std::string pfile = indexDir + "/" + pufferfish::util::EXTENSION;
+  //   auto bits_per_element = compact::get_bits_per_element(pfile);
+  //   auxInfo_.set_m_bits(bits_per_element);
+  //   auxInfo_.deserialize(pfile, false);
+  //   std::string pfileSize = indexDir + "/" + pufferfish::util::EXTENSIONSIZE;
+  //   bits_per_element = compact::get_bits_per_element(pfileSize);
+  //   extSize_.set_m_bits(bits_per_element);
+  //   extSize_.deserialize(pfileSize, false);
+  // }
 
   /** CHANGED **/
   {
